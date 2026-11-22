@@ -1,0 +1,238 @@
+; ============================================================
+; SNAKE for the TC-8
+; Screen: 16x16 VRAM, pos = y*16 + x (a position IS a VRAM address)
+; Colors: 0 empty, 1 snake (green), 2 food / game over (red)
+; Controls: KEY 1=up 2=down 3=left 4=right
+; ============================================================
+
+; ---- memory-mapped I/O ----
+.equ KEY,    0xF0        ; last key, clears on read
+.equ RNG,    0xF1        ; next random byte (never 0)
+.equ FRAME,  0xF2        ; +1 every 2000 instructions
+.equ SCORE,  0xF3        ; shown by the UI
+
+; ---- game data in RAM ----
+.equ BODY,   0x20        ; ring buffer of positions, 0x20..0x9F (128 entries)
+.equ HEAD_I, 0xA0        ; ring index (0..127) of the head
+.equ TAIL_I, 0xA1        ; ring index (0..127) of the tail
+.equ DIR,    0xA2        ; current direction (delta)
+.equ PDIR,   0xA3        ; pending direction, applied at the next step
+.equ DELAY,  0xA4        ; frames left until the next step
+.equ LASTF,  0xA5        ; last FRAME value seen
+
+; ---- tuning ----
+.equ STEP_FRAMES, 4      ; frames per snake step (bigger = slower)
+
+; ---- direction deltas (8-bit, added to a position) ----
+.equ UP,     0xF0        ; -16
+.equ DOWN,   0x10        ; +16
+.equ LEFT,   0xFF        ; -1
+.equ RIGHT,  0x01        ; +1
+
+start:
+        CALL init_game
+
+; ------------------------------------------------------------
+; Main loop: poll input every pass; step once every STEP_FRAMES frames
+; ------------------------------------------------------------
+main:
+        LDA  R0, [KEY]          ; reading KEY also clears it
+        CMPI R0, 0
+        JZ   no_key
+        LDI  R1, UP             ; map key 1..4 -> direction delta in R1
+        CMPI R0, 1
+        JZ   got_dir
+        LDI  R1, DOWN
+        CMPI R0, 2
+        JZ   got_dir
+        LDI  R1, LEFT
+        CMPI R0, 3
+        JZ   got_dir
+        LDI  R1, RIGHT
+        CMPI R0, 4
+        JNZ  no_key             ; unknown key: ignore
+got_dir:
+        LDA  R2, [DIR]          ; reversal check: new + current == 0 (mod 256)
+        MOV  R3, R1
+        ADD  R3, R2
+        JZ   no_key             ; reversing into yourself: ignore
+        STA  [PDIR], R1
+no_key:
+        LDA  R0, [FRAME]        ; wait until FRAME changes
+        LDA  R1, [LASTF]
+        CMP  R0, R1
+        JZ   main
+        STA  [LASTF], R0
+        LDA  R0, [DELAY]        ; count down frames
+        SUBI R0, 1
+        STA  [DELAY], R0
+        JNZ  main
+        LDI  R0, STEP_FRAMES    ; reload the counter and do one step
+        STA  [DELAY], R0
+        CALL game_step
+        JMP  main
+
+; ------------------------------------------------------------
+; init_game: reset variables, clear screen, draw snake + food
+; ------------------------------------------------------------
+init_game:
+        CALL clear_screen
+        LDI  R0, 0
+        STA  [SCORE], R0
+        STA  [TAIL_I], R0       ; tail at ring index 0
+        LDI  R0, 2
+        STA  [HEAD_I], R0       ; head at ring index 2 (length 3)
+        LDI  R0, RIGHT
+        STA  [DIR], R0
+        STA  [PDIR], R0
+        LDI  R0, STEP_FRAMES
+        STA  [DELAY], R0
+        LDA  R0, [FRAME]
+        STA  [LASTF], R0
+        CALL draw_initial
+        CALL place_food
+        RET
+
+; ------------------------------------------------------------
+; clear_screen: VRAM[0..255] = 0
+; ------------------------------------------------------------
+clear_screen:
+        LDI  R0, 0              ; R0 = address
+        LDI  R1, 0              ; R1 = color
+cs_loop:
+        VST  [R0], R1
+        ADDI R0, 1
+        JNC  cs_loop            ; carry when R0 wraps 255 -> 0
+        RET
+
+; ------------------------------------------------------------
+; draw_initial: snake of length 3 at row 8, x = 6..8, heading right
+; ------------------------------------------------------------
+draw_initial:
+        LDI  R1, 1              ; snake color
+        LDI  R0, 0x86           ; tail (y=8, x=6)
+        STA  [BODY], R0
+        VST  [R0], R1
+        LDI  R0, 0x87
+        STA  [BODY+1], R0
+        VST  [R0], R1
+        LDI  R0, 0x88           ; head (y=8, x=8)
+        STA  [BODY+2], R0
+        VST  [R0], R1
+        RET
+
+; ------------------------------------------------------------
+; place_food: pick random cells until an empty one; paint it red
+; ------------------------------------------------------------
+place_food:
+        LDA  R0, [RNG]
+        VLD  R1, [R0]
+        CMPI R1, 0
+        JNZ  place_food
+        LDI  R1, 2
+        VST  [R0], R1
+        RET
+
+; ------------------------------------------------------------
+; game_step: apply pending dir, check wall, move / eat / die
+; Registers: R0 dir, R1 head pos -> new pos, R2 head index, R4 cell
+; ------------------------------------------------------------
+game_step:
+        LDA  R0, [PDIR]
+        STA  [DIR], R0
+        LDA  R2, [HEAD_I]
+        MOV  R3, R2
+        ADDI R3, BODY
+        LD   R1, [R3]           ; R1 = current head position
+        ; --- wall check BEFORE moving ---
+        CMPI R0, LEFT
+        JNZ  chk_right
+        MOV  R4, R1
+        ANDI R4, 15
+        JZ   die                ; x == 0
+        JMP  move
+chk_right:
+        CMPI R0, RIGHT
+        JNZ  chk_up
+        MOV  R4, R1
+        ANDI R4, 15
+        CMPI R4, 15
+        JZ   die                ; x == 15
+        JMP  move
+chk_up:
+        CMPI R0, UP
+        JNZ  chk_down
+        CMPI R1, 16
+        JC   die                ; pos < 16
+        JMP  move
+chk_down:
+        CMPI R1, 240
+        JNC  die                ; pos >= 240
+move:
+        ADD  R1, R0             ; R1 = new head position
+        VLD  R4, [R1]           ; what is there?
+        CMPI R4, 1
+        JZ   die                ; ran into the body
+        ADDI R2, 1              ; advance head index in the ring
+        ANDI R2, 0x7F
+        STA  [HEAD_I], R2
+        ADDI R2, BODY
+        ST   [R2], R1           ; store new head position
+        LDI  R5, 1
+        VST  [R1], R5           ; paint new head
+        CMPI R4, 2
+        JZ   eat
+        CALL drop_tail          ; normal move: the tail follows
+        RET
+eat:                            ; tail stays put, so the snake grows
+        LDA  R0, [SCORE]
+        ADDI R0, 1
+        STA  [SCORE], R0
+        ; Cap the length at 127 so the 128-entry ring never overwrites the
+        ; tail. This also keeps >= 128 cells free, so place_food always ends.
+        LDA  R2, [HEAD_I]
+        LDA  R3, [TAIL_I]
+        SUB  R2, R3
+        ANDI R2, 0x7F           ; R2 = length - 1
+        CMPI R2, 127
+        JNZ  eat_grow
+        CALL drop_tail          ; full: keep scoring, stop growing
+eat_grow:
+        CALL place_food
+        RET
+die:
+        CALL game_over
+        RET
+
+; ------------------------------------------------------------
+; drop_tail: erase the tail cell and advance the tail index
+; ------------------------------------------------------------
+drop_tail:
+        LDA  R2, [TAIL_I]
+        MOV  R3, R2
+        ADDI R3, BODY
+        LD   R3, [R3]           ; R3 = tail position
+        LDI  R5, 0
+        VST  [R3], R5
+        ADDI R2, 1
+        ANDI R2, 0x7F
+        STA  [TAIL_I], R2
+        RET
+
+; ------------------------------------------------------------
+; game_over: paint the screen red, wait for a key, restart
+; ------------------------------------------------------------
+game_over:
+        LDI  R0, 0
+        LDI  R1, 2
+go_fill:
+        VST  [R0], R1
+        ADDI R0, 1
+        JNC  go_fill
+        LDA  R0, [KEY]          ; drop any key pressed while dying
+go_wait:
+        LDA  R0, [KEY]
+        CMPI R0, 0
+        JZ   go_wait
+        CALL init_game
+        RET

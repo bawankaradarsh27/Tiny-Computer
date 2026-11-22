@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TC-8</title>
+<style>
+  :root {
+    --bg: #0d0f11;
+    --panel: #14171a;
+    --line: #262b30;
+    --text: #d9dde0;
+    --dim: #8a939b;
+    --faint: #5a636b;
+    --yellow: #ffd23f;
+    --blue: #4d9bff;
+    --orange: #ff8a3d;
+    --red: #ff4d4f;
+    --green: #3ddc84;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; scrollbar-color: #343a40 var(--bg); }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font: 13px/1.45 var(--mono); font-variant-numeric: tabular-nums;
+  }
+  ::selection { background: rgba(255, 210, 63, 0.28); color: #fff; }
+  :focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+
+  header { display: flex; align-items: baseline; gap: 12px; margin: 0 0 12px; }
+  h1 { font-size: 15px; margin: 0; letter-spacing: 0.02em; }
+  header p { margin: 0; color: var(--dim); }
+
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+
+  main { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+  section {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+  }
+  h2 { font-size: 11px; font-weight: 600; color: var(--dim); margin: 0 0 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+  /* 1. screen */
+  .scr { position: relative; width: 432px; height: 432px; }
+  #screen { display: block; width: 432px; height: 432px; image-rendering: pixelated; image-rendering: crisp-edges; border-radius: 2px; }
+  .scr::after {                       /* faint pixel grid: 16 cells of 27px */
+    content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 2px;
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 27px 27px;
+  }
+  .score { display: flex; justify-content: space-between; align-items: baseline; margin-top: 10px; }
+  .score b { font-size: 28px; font-weight: 600; line-height: 1; }
+  .hint { color: var(--dim); margin: 8px 0 0; max-width: 432px; }
+  .col { display: flex; flex-direction: column; gap: 12px; width: 232px; }
+
+  /* instruction trail: newest at the bottom */
+  #trail div { white-space: pre; height: 19px; color: var(--faint); overflow: hidden; }
+  #trail div:last-child { color: var(--text); }
+  #desc { margin: 8px 0 0; padding: 6px 8px; border-radius: 4px; background: #191d21; color: var(--dim); min-height: 2.9em; }
+
+  /* 2. cpu */
+  #cpu { width: 100%; }
+  .regs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .reg { display: flex; justify-content: space-between; gap: 6px; padding: 4px 6px; border-radius: 4px; background: #191d21; }
+  .reg span:first-child { color: var(--dim); }
+  .reg i { font-style: normal; color: var(--faint); opacity: 0; transition: opacity 120ms ease; }
+  .reg:hover i { opacity: 1; }
+  .reg.lit span:first-child, .reg.lit i { color: var(--text); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin-top: 10px; }
+  .kv dt { color: var(--dim); }
+  .kv dd { margin: 0; text-align: right; }
+  .flags { display: flex; gap: 4px; justify-content: flex-end; }
+  .flag { width: 22px; text-align: center; border-radius: 3px; color: var(--faint); background: #191d21; }
+  .flag.on { color: #111; background: var(--green); }
+  #banner { display: none; margin-top: 10px; padding: 6px 8px; border-radius: 4px; border: 1px solid; }
+  #banner.halt { display: block; color: var(--dim); border-color: var(--line); background: #191d21; }
+  #banner.fault { display: block; color: #ffd0d0; border-color: #6b2a2b; background: #2a1517; }
+  #banner.bp { display: block; color: #ffd0d0; border-color: #6b2a2b; background: #241618; }
+
+  /* 3. memory */
+  #mem { display: block; }
+  .legend { display: flex; gap: 14px; margin-top: 8px; color: var(--dim); }
+  .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .legend .r::before { background: var(--blue); }
+  .legend .w::before { background: var(--orange); }
+
+  /* 4. source */
+  #source { flex: 1 1 300px; min-width: 300px; }
+  #cur { display: flex; gap: 12px; padding: 6px 8px; margin-bottom: 8px; border-radius: 4px; background: #191d21; white-space: pre; overflow: hidden; }
+  #cur .lbl { color: var(--dim); }
+  #cur .ins { color: var(--yellow); }
+  #listing { height: 414px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; background: #101315; padding: 4px 0; }
+  .ln { display: flex; white-space: pre; }
+  .ln .no { flex: 0 0 52px; text-align: right; padding-right: 12px; color: var(--faint); user-select: none; position: relative; }
+  .ln .tx { flex: 1; padding-right: 8px; }
+  .ln.cur { background: rgba(255, 210, 63, 0.14); }
+  .ln.cur .no { color: var(--yellow); }
+  .tx .cm { color: var(--faint); }
+  .ln.code .no { cursor: pointer; }
+  .ln.bp .no { color: #ffb3b4; }
+  .ln.bp .no::before {
+    content: ""; position: absolute; left: 8px; top: 50%; width: 8px; height: 8px;
+    margin-top: -4px; border-radius: 50%; background: var(--red);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .ln.code .no:hover { color: var(--text); }
+  }
+  #editor {
+    display: block; width: 100%; height: 414px; resize: vertical; margin: 0; padding: 4px 8px;
+    border: 1px solid var(--line); border-radius: 4px; background: #101315; color: var(--text);
+    font: inherit; line-height: 1.45; tab-size: 8; caret-color: var(--yellow);
+  }
+  #editor[hidden], #listing[hidden], #errors[hidden] { display: none; }
+  #errors {
+    margin-top: 8px; padding: 6px 8px; border-radius: 4px; border: 1px solid #6b2a2b;
+    background: #2a1517; color: #ffd0d0; max-height: 120px; overflow: auto; white-space: pre;
+  }
+  .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .head h2 { margin: 0; }
+
+  /* controls */
+  .bar label { display: inline-flex; align-items: center; gap: 8px; color: var(--dim); }
+  .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+  button, select {
+    font: inherit; color: var(--text); background: #1c2125; border: 1px solid #2e353b;
+    border-radius: 4px; padding: 5px 12px; cursor: pointer;
+    transition: transform 160ms var(--ease-out), background-color 120ms ease;
+  }
+  button:active:not(:disabled) { transform: scale(0.97); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary { background: var(--text); color: #0d0f11; border-color: var(--text); font-weight: 600; min-width: 76px; }
+  button.small { padding: 2px 10px; font-size: 12px; }
+  button[aria-pressed="true"] { background: #2a3036; }
+  @media (hover: hover) and (pointer: fine) {
+    button:hover:not(:disabled), select:hover { background: #242a2f; }
+    button.primary:hover:not(:disabled) { background: #fff; }
+  }
+  select { padding: 5px 8px; }
+  .speed input { width: 180px; accent-color: var(--text); }
+  .speed output { min-width: 96px; color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>TC-8</h1>
+  <p>8-bit tiny computer, running Snake</p>
+</header>
+
+<div class="bar" id="bar">
+  <button id="run" class="primary">Pause</button>
+  <button id="step">Step</button>
+  <button id="reset">Reset</button>
+  <span class="sep"></span>
+  <label class="speed">Speed
+    <input id="speed" type="range" min="0" max="1000" step="1">
+    <output id="speedOut">0 ips</output>
+  </label>
+  <button class="small preset" data-ips="5">Slow</button>
+  <button class="small preset" data-ips="500">Medium</button>
+  <button class="small preset" data-ips="50000">Fast</button>
+  <span class="sep"></span>
+  <button id="reasm">Reassemble &amp; Run</button>
+  <label>Sample
+    <select id="sample"></select>
+  </label>
+</div>
+
+<main>
+  <section id="game">
+    <h2>Screen</h2>
+    <div class="scr"><canvas id="screen" width="16" height="16"></canvas></div>
+    <div class="score"><span class="lbl">Score</span><b id="score">0</b></div>
+    <p class="hint">Arrows or WASD to steer.</p>
+  </section>
+
+  <div class="col">
+  <section id="cpu">
+    <h2>CPU</h2>
+    <div class="regs" id="regs"></div>
+    <dl class="kv">
+      <dt>PC</dt><dd id="pc">0x000</dd>
+      <dt>SP</dt><dd id="sp">0xEF</dd>
+      <dt>Flags</dt><dd><div class="flags"><span class="flag" id="fZ">Z</span><span class="flag" id="fC">C</span><span class="flag" id="fN">N</span></div></dd>
+      <dt>Cycles</dt><dd id="cycles">0</dd>
+      <dt>Frame</dt><dd id="frame">0</dd>
+    </dl>
+    <div id="banner"></div>
+  </section>
+
+  <section id="trailPanel">
+    <h2>Instruction trail</h2>
+    <div id="trail"></div>
+  </section>
+  </div>
+
+  <section id="source">
+    <div class="head"><h2>Source</h2><button id="edit" class="small" aria-pressed="false">Edit</button></div>
+    <div id="cur"><span class="lbl">PC 000</span><span class="lbl">0000</span><span class="ins">NOP</span></div>
+    <div id="listing" title="Click a line number to toggle a breakpoint"></div>
+    <textarea id="editor" hidden spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="Assembly source"></textarea>
+    <div id="errors" hidden role="alert"></div>
+    <p id="desc" aria-live="off">Nothing has run yet.</p>
+  </section>
+
+  <section id="memory">
+    <h2>Data RAM</h2>
+    <canvas id="mem"></canvas>
+    <div class="legend"><span class="r">read</span><span class="w">write</span></div>
+  </section>
+</main>
+
+<script src="src/cpu.js"></script>
+<script src="src/asm.js"></script>
+<script src="src/snake_asm.js"></script>
+<script src="src/counter_asm.js"></script>
+<script src="src/dodge_asm.js"></script>
+<script src="src/pong_asm.js"></script>
+<script src="src/ui.js"></script>
+</body>
+</html>

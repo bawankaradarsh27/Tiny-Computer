@@ -1,0 +1,5 @@
+# local tool folders and private notes (not part of the site)
+.impeccable/
+.gemini/
+CLAUDE.md
+PRODUCT.md
